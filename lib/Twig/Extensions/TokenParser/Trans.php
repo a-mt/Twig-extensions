@@ -11,16 +11,19 @@
 
 class Twig_Extensions_TokenParser_Trans extends Twig_TokenParser
 {
+    protected static $nodes = array('plural', 'context', 'notes', 'endtrans');
+
     /**
      * {@inheritdoc}
      */
     public function parse(Twig_Token $token)
     {
-        $lineno = $token->getLine();
-        $stream = $this->parser->getStream();
-        $count = null;
-        $plural = null;
-        $notes = null;
+        $lineno  = $token->getLine();
+        $stream  = $this->parser->getStream();
+        $count   = null;
+        $plural  = null;
+        $notes   = null;
+        $context = null;
 
         if (!$stream->test(Twig_Token::BLOCK_END_TYPE)) {
             $body = $this->parser->getExpressionParser()->parseExpression();
@@ -29,18 +32,23 @@ class Twig_Extensions_TokenParser_Trans extends Twig_TokenParser
             $body = $this->parser->subparse(array($this, 'decideForFork'));
             $next = $stream->next()->getValue();
 
-            if ('plural' === $next) {
-                $count = $this->parser->getExpressionParser()->parseExpression();
-                $stream->expect(Twig_Token::BLOCK_END_TYPE);
-                $plural = $this->parser->subparse(array($this, 'decideForFork'));
+            $nodes = self::$nodes;
+            while(true) {
+                if(!$nodes || $next === 'endtrans') break;
 
-                if ('notes' === $stream->next()->getValue()) {
-                    $stream->expect(Twig_Token::BLOCK_END_TYPE);
-                    $notes = $this->parser->subparse(array($this, 'decideForEnd'), true);
+                $head = array_shift($nodes);
+                if($next !== $head) {
+                    continue;
                 }
-            } elseif ('notes' === $next) {
+                if($head == 'plural') {
+                    $count = $this->parser->getExpressionParser()->parseExpression();
+                }
                 $stream->expect(Twig_Token::BLOCK_END_TYPE);
-                $notes = $this->parser->subparse(array($this, 'decideForEnd'), true);
+                $$head = $this->parser->subparse(array($this, $nodes ? 'decideForFork' : 'decideForEnd'));
+
+                if($nodes) {
+                    $next = $stream->next()->getValue();
+                }
             }
         }
 
@@ -48,12 +56,12 @@ class Twig_Extensions_TokenParser_Trans extends Twig_TokenParser
 
         $this->checkTransString($body, $lineno);
 
-        return new Twig_Extensions_Node_Trans($body, $plural, $count, $notes, $lineno, $this->getTag());
+        return new Twig_Extensions_Node_Trans($body, $plural, $count, $notes, $context, $lineno, $this->getTag());
     }
 
     public function decideForFork(Twig_Token $token)
     {
-        return $token->test(array('plural', 'notes', 'endtrans'));
+        return $token->test(self::$nodes);
     }
 
     public function decideForEnd(Twig_Token $token)
@@ -76,6 +84,8 @@ class Twig_Extensions_TokenParser_Trans extends Twig_TokenParser
                 $node instanceof Twig_Node_Text
                 ||
                 ($node instanceof Twig_Node_Print && $node->getNode('expr') instanceof Twig_Node_Expression_Name)
+                ||
+                ($node instanceof Twig_Node_Print && $node->getNode('expr') instanceof Twig_Node_Expression_Filter)
             ) {
                 continue;
             }

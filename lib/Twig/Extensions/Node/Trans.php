@@ -16,7 +16,7 @@
  */
 class Twig_Extensions_Node_Trans extends Twig_Node
 {
-    public function __construct(Twig_Node $body, Twig_Node $plural = null, Twig_Node_Expression $count = null, Twig_Node $notes = null, $lineno, $tag = null)
+    public function __construct(Twig_Node $body, Twig_Node $plural = null, Twig_Node_Expression $count = null, Twig_Node $notes = null, Twig_Node $context = null, $lineno, $tag = null)
     {
         $nodes = array('body' => $body);
         if (null !== $count) {
@@ -27,6 +27,9 @@ class Twig_Extensions_Node_Trans extends Twig_Node
         }
         if (null !== $notes) {
             $nodes['notes'] = $notes;
+        }
+        if (null !== $context) {
+            $nodes['context'] = $context;
         }
 
         parent::__construct($nodes, array(), $lineno, $tag);
@@ -47,7 +50,7 @@ class Twig_Extensions_Node_Trans extends Twig_Node
             $vars = array_merge($vars, $vars1);
         }
 
-        $function = $this->getTransFunction($this->hasNode('plural'));
+        $function = $this->getTransFunction($this->hasNode('plural'), $this->hasNode('context'));
 
         if ($this->hasNode('notes')) {
             $message = trim($this->getNode('notes')->getAttribute('data'));
@@ -57,23 +60,28 @@ class Twig_Extensions_Node_Trans extends Twig_Node
             $compiler->write("// notes: {$message}\n");
         }
 
-        if ($vars) {
+        $compiler
+            ->write('echo '. ($vars ? 'strtr(' : '') . $function.'(')
+            ->subcompile($msg)
+        ;
+
+        if ($this->hasNode('plural')) {
             $compiler
-                ->write('echo strtr('.$function.'(')
-                ->subcompile($msg)
+                ->raw(', ')
+                ->subcompile($msg1)
+                ->raw(', abs(')
+                ->subcompile($this->hasNode('count') ? $this->getNode('count') : null)
+                ->raw(')')
             ;
+        }
+        if ($this->hasNode('context')) {
+            $compiler
+                ->raw(', ')
+                ->string(trim($this->getNode('context')->getAttribute('data')));
+        }
 
-            if ($this->hasNode('plural')) {
-                $compiler
-                    ->raw(', ')
-                    ->subcompile($msg1)
-                    ->raw(', abs(')
-                    ->subcompile($this->hasNode('count') ? $this->getNode('count') : null)
-                    ->raw(')')
-                ;
-            }
-
-            $compiler->raw('), array(');
+        if($vars) {
+            $compiler->raw(') , array(');
 
             foreach ($vars as $var) {
                 if ('count' === $var->getAttribute('name')) {
@@ -92,26 +100,10 @@ class Twig_Extensions_Node_Trans extends Twig_Node
                     ;
                 }
             }
-
-            $compiler->raw("));\n");
-        } else {
-            $compiler
-                ->write('echo '.$function.'(')
-                ->subcompile($msg)
-            ;
-
-            if ($this->hasNode('plural')) {
-                $compiler
-                    ->raw(', ')
-                    ->subcompile($msg1)
-                    ->raw(', abs(')
-                    ->subcompile($this->hasNode('count') ? $this->getNode('count') : null)
-                    ->raw(')')
-                ;
-            }
-
-            $compiler->raw(");\n");
+            $compiler->raw(')');
         }
+
+        $compiler->raw(");\n");
     }
 
     /**
@@ -140,7 +132,7 @@ class Twig_Extensions_Node_Trans extends Twig_Node
                         $n = $n->getNode('node');
                     }
                     $msg .= sprintf('%%%s%%', $n->getAttribute('name'));
-                    $vars[] = new Twig_Node_Expression_Name($n->getAttribute('name'), $n->getTemplateLine());
+                    $vars[] = new Twig_Extensions_Node_Get($n->getAttribute('name'), $node->getNode('expr'), $n->getTemplateLine());
                 } else {
                     $msg .= $node->getAttribute('data');
                 }
@@ -157,9 +149,29 @@ class Twig_Extensions_Node_Trans extends Twig_Node
      *
      * @return string
      */
-    protected function getTransFunction($plural)
+    protected function getTransFunction($plural, $context)
     {
-        return $plural ? 'ngettext' : 'gettext';
+        if($context) {
+            return $plural ? 'npgettext' : 'pgettext';
+        } else {
+            return $plural ? 'ngettext' : 'gettext';
+        }
+    }
+}
+if (!function_exists('pgettext')) {
+    function pgettext($context, $str) {
+        $cstr  = $context . "\x04" . $str;
+        $trans = gettext($cstr);
+
+        return $trans == $cstr ? $str : $trans;
+    }
+}
+if (!function_exists('npgettext')) {
+    function npgettext($context, $str, $str_plural, $count) {
+        $cstr  = $context . "\x04" . $str;
+        $trans = ngettext($cstr, $str_plural, $count);
+
+        return $trans == $cstr ? $str : $trans;
     }
 }
 
